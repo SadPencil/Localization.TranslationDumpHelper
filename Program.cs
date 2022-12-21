@@ -1,4 +1,6 @@
 ﻿using Microsoft.Build.Locator;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.MSBuild;
 using System;
@@ -9,6 +11,7 @@ using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using System.Xml.Linq;
 
 namespace Localization.TranslationDumpHelper
 {
@@ -24,7 +27,7 @@ namespace Localization.TranslationDumpHelper
             // constants
             string solutionDir;
 #if DEBUG
-            solutionDir = "../../..";
+            solutionDir = "D:\\SadPencil\\Documents\\GitHub\\xna-cncnet-client";
 #else
             solutionDir = ".";
 #endif
@@ -41,9 +44,6 @@ namespace Localization.TranslationDumpHelper
             };
             var solution = workspace.OpenSolutionAsync(solutionFullPath).Result;
 
-            Dictionary<string, string> translations = new Dictionary<string, string>();
-            HashSet<string> duplicatedLabels = new HashSet<string>();
-
             foreach (var project in solution.Projects)
             {
                 if (!projectsToBeAnalyzed.Contains(project.Name))
@@ -52,142 +52,37 @@ namespace Localization.TranslationDumpHelper
                 }
 
                 ConsoleWriteColorLine($"==== Project: {project.Name} [{project.DocumentIds.Count}] ====", ConsoleColor.Green);
-                string test = "\" +  \"";
-                ReplaceStringRegex(ref test, new Regex("\"\\s*\\+\\s*\\\"", RegexOptions.CultureInvariant), "");//test
                 var compilation = project.GetCompilationAsync().Result;
+
                 foreach (var tree in compilation.SyntaxTrees)
                 {
-                    var invocationSyntaxes = tree.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>();
-                    foreach (var syntax in invocationSyntaxes)
+                    //var invocationSyntaxes = tree.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>();
+                    // https://stackoverflow.com/questions/43679690/with-roslyn-find-calling-method-from-string-literal-parameter
+                    var invocationSyntaxes = tree.GetRoot().DescendantNodes().OfType<MemberAccessExpressionSyntax>();
+                    foreach (var s in invocationSyntaxes)
                     {
-                        // Warning: the implementation is naive and unreliable. Use it at your own risk!
+                        if (s == null) { continue; }
+                        if (s.Kind() != SyntaxKind.SimpleMemberAccessExpression) { continue; }
 
-                        string syntaxText = syntax.ToString();
-                        if (syntaxText.Contains(".L10N("))
+                        if (s.Name.ToString() == "L10N")
                         {
-                            while (true)
+                            var p = s.Parent as InvocationExpressionSyntax;
+                            if (p == null) { continue; }
+                            if (p.ArgumentList.Arguments.Count > 0)
                             {
-                                bool replaced = false;
-                                //replaced |= ReplaceString(ref syntaxText, "  ", " ");
-                                replaced |= ReplaceString(ref syntaxText, "\r\n", "\n");
-                                //replaced |= ReplaceString(ref syntaxText, "\\\n", "");
-                                replaced |= ReplaceString(ref syntaxText, "+\n", "+");
-                                replaced |= ReplaceString(ref syntaxText, "(\n", "(");
-                                replaced |= ReplaceString(ref syntaxText, "Environment.NewLine", "\"\\n\"");
-                                //replaced |= ReplaceString(ref syntaxText, "\" + \"", "");
-                                replaced |= ReplaceStringRegex(ref syntaxText, new Regex("\"\\s*\\+\\s*\\\"", RegexOptions.CultureInvariant), "");
-                                if (!replaced) break;
-                            }
+                                var x = p.ArgumentList.Arguments[0];
+                                Console.WriteLine($"{x}");
 
-                            if (new Regex("^\\(\"[\\s\\S]*\"\\).L10N\\(\"[\\s\\S]*\"\\)$", RegexOptions.CultureInvariant).IsMatch(syntaxText))
-                            {
-                                Debug.Assert(syntaxText.First() == '(');
-                                syntaxText = syntaxText.Substring(1);
-                                ReplaceString(ref syntaxText, ").L10N(", ".L10N(");
-                            }
-
-                            List<string> validStrings = new List<string>();
-                            if (new Regex("^\"[\\s\\S]*\".L10N\\(\"[\\s\\S]*\"\\)$", RegexOptions.CultureInvariant).IsMatch(syntaxText))
-                            {
-                                validStrings.Add(syntaxText);
-                            }
-                            else
-                            {
-                                //non greedy
-                                bool found = false;
-                                var matches = new Regex("\"[\\s\\S]*?\".L10N\\(\"[\\s\\S]*\"\\)", RegexOptions.CultureInvariant).Matches(syntaxText).Cast<Match>().ToList();
-                                if (matches.Count > 0)
-                                {
-                                    found = true;
-                                    foreach (Match match in matches) validStrings.Add(match.Value);
-                                }
-
-                                matches = new Regex("\\(\"[\\s\\S]*?\"\\).L10N\\(\"[\\s\\S]*\"\\)", RegexOptions.CultureInvariant).Matches(syntaxText).Cast<Match>().ToList();
-                                if (matches.Count > 0)
-                                {
-                                    found = true;
-                                    foreach (Match match in matches)
-                                    {
-                                        string value = match.Value;
-                                        Debug.Assert((new Regex("^\\(\"[\\s\\S]*\"\\).L10N\\(\"[\\s\\S]*\"\\)$", RegexOptions.CultureInvariant).IsMatch(value)));
-                                        Debug.Assert(value.First() == '(');
-                                        value = value.Substring(1);
-                                        ReplaceString(ref value, ").L10N(", ".L10N(");
-                                        validStrings.Add(value);
-                                    }
-                                }
-
-                                if (!found)
-                                {
-                                    ConsoleWriteColorLine("Warning: unrecognized string below.", ConsoleColor.Yellow);
-                                    ConsoleWriteColorLine(syntaxText, ConsoleColor.Cyan);
-                                }
-
-                            }
-                            foreach (var text in validStrings)
-                            {
-                                Debug.Assert(new Regex("^\"[\\s\\S]*\".L10N\\(\"[\\s\\S]*\"\\)$", RegexOptions.CultureInvariant).IsMatch(text));
-                                {
-                                    var split = text.Split(new string[] { ".L10N(" }, StringSplitOptions.None);
-                                    if (split.Length != 2) break;
-                                    Debug.Assert(split[0].First() == '\"');
-                                    Debug.Assert(split[0].Last() == '\"');
-                                    Debug.Assert(split[1].First() == '\"');
-                                    Debug.Assert(split[1].Last() == ')');
-
-                                    for (var i = 0; i < split.Length; i++)
-                                    {
-                                        ReplaceString(ref split[i], "\\n", "@@");
-                                        ReplaceString(ref split[i], "\\\"", "\"");
-                                        split[i] = split[i].Substring(1);
-                                        split[i] = split[i].Substring(0, split[i].Length - 1);
-                                        if (i == 1)
-                                        {
-                                            split[i] = split[i].Substring(0, split[i].Length - 1);
-                                        }
-                                    }
-                                    if (translations.ContainsKey(split[1]))
-                                    {
-                                        if (string.CompareOrdinal(split[0], translations[split[1]]) != 0)
-                                        {
-                                            _ = duplicatedLabels.Add(split[1]);
-                                            ConsoleWriteColorLine($"Warning: label {split[1]} is defined more than once with different values.", ConsoleColor.Yellow);
-                                            ConsoleWriteColorLine("1 - " + translations[split[1]], ConsoleColor.Cyan);
-                                            ConsoleWriteColorLine("2 - " + split[0], ConsoleColor.Cyan);
-                                            if (!split[0].Contains("\"") && (split[0].Length > translations[split[1]].Length || translations[split[1]].Contains("\"")))
-                                                translations[split[1]] = split[0];
-                                            ConsoleWriteColorLine("> - " + translations[split[1]], ConsoleColor.Cyan);
-                                        }
-                                        else
-                                        {
-                                            // do nothing
-                                        }
-                                    }
-                                    else
-                                    {
-                                        translations.Add(split[1], split[0]);
-                                    }
-
-                                }
-
+                                // https://stackoverflow.com/questions/35670115/how-to-use-roslyn-to-get-compile-time-constant-value
+                                var semanticModel = compilation.GetSemanticModel(x.SyntaxTree);
+                                Console.WriteLine($"++{semanticModel.GetConstantValue(x.Expression).Value?.ToString()}");
 
                             }
 
 
                         }
                     }
-                }
-            }
-            foreach (var kv in translations)
-            {
-                Console.WriteLine($"{kv.Key}={kv.Value}");
-            }
-            if (duplicatedLabels.Count > 0)
-            {
-                ConsoleWriteColorLine("Warning: the follow labels might be defined more than once with different values. Please fix or ignore it.", ConsoleColor.Yellow);
-                foreach (var label in duplicatedLabels)
-                {
-                    Console.WriteLine(label);
+
                 }
             }
 
@@ -198,19 +93,6 @@ namespace Localization.TranslationDumpHelper
 #endif
         });
 
-        static bool ReplaceString(ref string text, string oldValue, string newValue)
-        {
-            if (!text.Contains(oldValue)) return false;
-            text = text.Replace(oldValue, newValue);
-            return true;
-        }
-
-        static bool ReplaceStringRegex(ref string text, Regex pattern, string newValue)
-        {
-            if (!pattern.IsMatch(text)) return false;
-            text = pattern.Replace(text, newValue);
-            return true;
-        }
         static bool PrintAndOmitError(Exception ex)
         {
             if (ex is AggregateException aggregateException)
