@@ -66,20 +66,34 @@ namespace Localization.TranslationDumpHelper
 
                         if (s.Name.ToString() == "L10N")
                         {
-                            var p = s.Parent as InvocationExpressionSyntax;
-                            if (p == null) { continue; }
-                            if (p.ArgumentList.Arguments.Count > 0)
+                            var l10nSyntax = s.Parent as InvocationExpressionSyntax;
+                            if (l10nSyntax == null || l10nSyntax.ArgumentList.Arguments.Count == 0) { continue; }
+
+                            var keyNameSyntax = l10nSyntax.ArgumentList.Arguments[0];
+                            if (!keyNameSyntax.Expression.IsKind(SyntaxKind.StringLiteralExpression))
                             {
-                                var x = p.ArgumentList.Arguments[0];
-                                Console.WriteLine($"{x}");
-
-                                // https://stackoverflow.com/questions/35670115/how-to-use-roslyn-to-get-compile-time-constant-value
-                                var semanticModel = compilation.GetSemanticModel(x.SyntaxTree);
-                                Console.WriteLine($"++{semanticModel.GetConstantValue(x.Expression).Value?.ToString()}");
-
+                                ConsoleWriteColorLine($"Warning: {keyNameSyntax.Expression} is of kind {keyNameSyntax.Expression.Kind().ToString()}. StringLiteralExpression is expected.", ConsoleColor.Yellow);
+                                continue;
                             }
 
+                            // https://stackoverflow.com/questions/35670115/how-to-use-roslyn-to-get-compile-time-constant-value
+                            var semanticModel = compilation.GetSemanticModel(keyNameSyntax.SyntaxTree);
+                            string keyName = semanticModel.GetConstantValue(keyNameSyntax.Expression).Value?.ToString();
 
+                            if (!l10nSyntax.Expression.IsKind(SyntaxKind.SimpleMemberAccessExpression))
+                            {
+                                ConsoleWriteColorLine($"Warning: {l10nSyntax.Expression} is of kind {l10nSyntax.Expression.Kind().ToString()}. SimpleMemberAccessExpression is expected.", ConsoleColor.Yellow);
+                                continue;
+                            }
+
+                            var valueSyntax = l10nSyntax.Expression as MemberAccessExpressionSyntax;
+                            string valueText = semanticModel.GetConstantValue(valueSyntax.Expression).Value?.ToString();
+                            if (string.IsNullOrEmpty(valueText))
+                            {
+                                ConsoleWriteColorLine($"Warning: Failed to get the value of key {keyName} as a string. {valueText}", ConsoleColor.Yellow);
+                                continue;
+                            }
+                            Console.WriteLine($"{keyName}={valueText}");
                         }
                     }
 
