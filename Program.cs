@@ -19,8 +19,7 @@ namespace Localization.TranslationDumpHelper
     {
         static void Main(string[] args) => GeneralTryCatchCUI(() =>
         {
-            ConsoleWriteColorLine("Warning: this program is naive and unreliable. Use it at your own risk!", ConsoleColor.Yellow);
-            ConsoleWriteColorLine("Also, strings in condition compiling are ignored and I don't know how to deal with it.", ConsoleColor.Yellow);
+            ConsoleWriteColorLine("Warning: Strings in condition compiling are ignored and I don't know how to deal with it.", ConsoleColor.Yellow);
             // initialize: find the MSBuild that comes with VS2017 or later
             _ = MSBuildLocator.RegisterDefaults();
 
