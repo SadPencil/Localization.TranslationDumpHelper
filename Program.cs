@@ -78,7 +78,8 @@ namespace Localization.TranslationDumpHelper
 
                             // https://stackoverflow.com/questions/35670115/how-to-use-roslyn-to-get-compile-time-constant-value
                             var semanticModel = compilation.GetSemanticModel(keyNameSyntax.SyntaxTree);
-                            string keyName = semanticModel.GetConstantValue(keyNameSyntax.Expression).Value?.ToString();
+                            var keyValue = semanticModel.GetConstantValue(keyNameSyntax.Expression).Value;
+                            string keyName = keyValue?.ToString();
 
                             if (!l10nSyntax.Expression.IsKind(SyntaxKind.SimpleMemberAccessExpression))
                             {
@@ -87,12 +88,13 @@ namespace Localization.TranslationDumpHelper
                             }
 
                             var valueSyntax = l10nSyntax.Expression as MemberAccessExpressionSyntax;
-                            string valueText = semanticModel.GetConstantValue(valueSyntax.Expression).Value?.ToString();
-                            if (string.IsNullOrEmpty(valueText))
+                            var valueValue = semanticModel.GetConstantValue(valueSyntax.Expression).Value;
+                            if (valueValue is null)
                             {
-                                ConsoleWriteColorLine($"Warning: Failed to get the value of key {keyName} as a string. {valueText}", ConsoleColor.Yellow);
+                                ConsoleWriteColorLine($"Warning: Failed to get the value of key {keyName} as a string. {valueSyntax.Expression}", ConsoleColor.Yellow);
                                 continue;
                             }
+                            string valueText = semanticModel.GetConstantValue(valueSyntax.Expression).Value?.ToString();
                             Console.WriteLine($"{keyName}={valueText}");
                         }
                     }
